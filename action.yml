@@ -1,0 +1,32 @@
+name: Scavi Context Check
+description: Check whether AI coding instructions still match the repository.
+author: Scavi
+
+inputs:
+  repository-path:
+    description: Repository path to analyze.
+    required: false
+    default: .
+  diff-base:
+    description: Optional Git revision to compare with HEAD for PR-aware reporting.
+    required: false
+  fail-on-deterministic:
+    description: Fail the action when deterministic errors are found.
+    required: false
+    default: "true"
+
+outputs:
+  issue-count:
+    description: Total number of Scavi issues.
+  error-count:
+    description: Number of deterministic errors.
+  changed-files:
+    description: JSON array of files changed since diff-base.
+
+runs:
+  using: node20
+  main: packages/github-action/dist/index.cjs
+
+branding:
+  icon: search
+  color: purple

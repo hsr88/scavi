@@ -1,0 +1,10 @@
+node_modules/
+dist/
+!packages/github-action/dist/
+packages/github-action/dist/*
+!packages/github-action/dist/index.cjs
+*.tsbuildinfo
+.scavi/cache/
+coverage/
+work/
+dist-types/

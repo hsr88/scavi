@@ -1,0 +1,5 @@
+{
+  "name":"@scavi/github-action","version":"0.1.0","private":true,"license":"MIT","type":"module",
+  "main":"dist/index.cjs","scripts":{"build":"tsc -b","bundle":"esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/index.cjs"},
+  "dependencies":{"@actions/core":"^3.0.1","@scavi/core":"workspace:*"},"devDependencies":{"esbuild":"^0.28.2"}
+}

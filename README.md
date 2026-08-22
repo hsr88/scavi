@@ -182,6 +182,8 @@ For claims about architecture, application behavior, data flow, or implementatio
 
 This is where Scavi's retrieval and AI layer comes in.
 
+Semantic verification is opt-in. Scavi first indexes text files locally, retrieves only the most relevant chunks, and sends only the claim plus those chunks to the configured provider. A weak retrieval result becomes `uncertain` without an API call.
+
 ---
 
 ## Fix, don't just report
@@ -200,7 +202,19 @@ You stay in control — proposed changes are reviewed before being applied.
 
 ## GitHub Actions
 
-Scavi is being designed to run automatically when your code changes.
+Scavi includes a JavaScript Action that uses the same core and deterministic rules as the CLI. It writes a Markdown job summary, exposes issue counts as outputs, and can include files changed since a pull request base revision.
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+    with:
+      fetch-depth: 0
+
+  - uses: hsr88/scavi@v0
+    with:
+      diff-base: ${{ github.event.pull_request.base.sha }}
+      fail-on-deterministic: true
+```
 
 A pull request that changes application behavior could produce a check like:
 
@@ -241,32 +255,72 @@ Planned support includes:
 
 | Context                     | Status     |
 | --------------------------- | ---------- |
-| `AGENTS.md`                 | 🚧 Planned |
-| `CLAUDE.md`                 | 🚧 Planned |
-| `GEMINI.md`                 | 🚧 Planned |
-| GitHub Copilot instructions | 🚧 Planned |
-| Cursor rules                | 🚧 Planned |
-| Custom instruction files    | 🚧 Planned |
+| `AGENTS.md`                 | ✅ Deterministic checks |
+| `CLAUDE.md`                 | ✅ Deterministic checks |
+| `GEMINI.md`                 | ✅ Deterministic checks |
+| GitHub Copilot instructions | ✅ Deterministic checks |
+| Cursor rules                | ✅ Deterministic checks |
+| Custom instruction files    | ✅ Configured paths/globs |
 
 ---
 
 ## CLI
 
-Planned commands:
+Available in the current development version:
 
 ```bash
-# Configure Scavi
+# Configure Scavi without overwriting an existing config
 scavi init
 
 # Check AI coding context
 scavi check
 
-# Explain detected problems
-scavi check --verbose
+# Machine-readable output
+scavi check --format json
 
-# Generate suggested fixes
+# Check an explicit repository path
+scavi check ./my-project
+
+# Preview minimal deterministic fixes and approve before applying
 scavi fix
 ```
+
+### Optional semantic verification
+
+Semantic checks are disabled by default. Enable them explicitly in `scavi.config.ts`:
+
+```ts
+export default {
+  context: ["AGENTS.md", "CLAUDE.md"],
+  checks: {
+    semantic: true,
+  },
+  ai: {
+    provider: "openai",
+    model: "your-model-id",
+  },
+};
+```
+
+Then provide the key through the environment:
+
+```bash
+OPENAI_API_KEY=your-key scavi check
+```
+
+Scavi uses the OpenAI Responses API with stored responses disabled. Repository content is treated as untrusted data, and only retrieved evidence is included in a request. Deterministic mode does not require a key or make network requests.
+
+For fully local semantic verification, run Ollama and configure:
+
+```ts
+ai: {
+  provider: "ollama",
+  model: "your-local-model",
+  baseUrl: "http://localhost:11434",
+}
+```
+
+The Ollama adapter uses its local `/api/chat` endpoint with streaming disabled, temperature `0`, and a JSON schema for the verdict.
 
 Or without installing globally:
 
@@ -341,32 +395,34 @@ Scavi aims to make AI context a maintainable part of the software development li
 
 ### v0.1 — Digging begins 🦝
 
-* [ ] CLI foundation
-* [ ] Context file discovery
-* [ ] `AGENTS.md` support
-* [ ] `CLAUDE.md` support
-* [ ] Cursor rules support
-* [ ] Copilot instructions support
-* [ ] Path validation
-* [ ] Command and package-manager validation
-* [ ] Dependency checks
-* [ ] Cross-file contradiction detection
-* [ ] Semantic verification
-* [ ] Repository retrieval / RAG
-* [ ] `scavi check`
-* [ ] `scavi fix`
-* [ ] GitHub Action
-* [ ] PR reports
+* [x] CLI foundation
+* [x] Context file discovery
+* [x] `AGENTS.md` support
+* [x] `CLAUDE.md` support
+* [x] Cursor rules support
+* [x] Copilot instructions support
+* [x] Path validation
+* [x] Command and package-manager validation
+* [x] Dependency checks
+* [x] `scavi init`
+* [x] Custom context paths and globs
+* [x] Cross-file package-manager contradiction detection
+* [x] Optional semantic verification with evidence and confidence
+* [x] Local lexical repository retrieval
+* [x] OpenAI Responses API provider
+* [x] `scavi check`
+* [x] Deterministic `scavi fix`
+* [x] GitHub Action
+* [x] PR-aware job summary and outputs
 
 ### Later
 
 * [ ] Additional agent formats
-* [ ] Custom context files
 * [ ] Context Health score
 * [ ] Context size and duplication analysis
 * [ ] Historical drift detection
 * [ ] MCP integration
-* [ ] Local model support
+* [x] Local Ollama provider
 * [ ] Evaluation suite
 * [ ] Optional web dashboard
 

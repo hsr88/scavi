@@ -17,17 +17,26 @@ function tokens(value: string): string[] {
 export async function indexRepository(root: string, options: RetrievalOptions = {}): Promise<RepositoryChunk[]> {
   const exclude = new Set((options.excludeFiles ?? []).map((file) => file.replace(/\\/g, "/")));
   const maxFiles = options.maxFiles ?? 2_000, maxBytes = options.maxFileBytes ?? 256_000, chunkLines = options.chunkLines ?? 40, overlap = options.overlapLines ?? 8;
-  const entries = await readdir(root, { withFileTypes: true, recursive: true });
+  async function walk(directory: string): Promise<string[]> {
+    const discovered: string[] = [];
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const absolute = path.join(directory, entry.name);
+      const relative = path.relative(root, absolute).split(path.sep).join("/");
+      if (entry.isDirectory()) {
+        if (!relative.split("/").some((part) => EXCLUDED_DIRECTORIES.has(part))) discovered.push(...await walk(absolute));
+      } else if (entry.isFile()) discovered.push(absolute);
+    }
+    return discovered;
+  }
   const files: string[] = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || files.length >= maxFiles) continue;
-    const absolute = path.join(entry.parentPath, entry.name), relative = path.relative(root, absolute).split(path.sep).join("/");
+  for (const absolute of (await walk(root)).sort()) {
+    const relative = path.relative(root, absolute).split(path.sep).join("/");
     if (relative.split("/").some((part) => EXCLUDED_DIRECTORIES.has(part)) || exclude.has(relative)) continue;
-    if (!TEXT_EXTENSIONS.has(path.extname(entry.name).toLowerCase()) && !TEXT_FILENAMES.has(entry.name)) continue;
+    if (!TEXT_EXTENSIONS.has(path.extname(absolute).toLowerCase()) && !TEXT_FILENAMES.has(path.basename(absolute))) continue;
     if ((await stat(absolute)).size <= maxBytes) files.push(absolute);
   }
   const chunks: RepositoryChunk[] = [];
-  for (const absolute of files.sort()) {
+  for (const absolute of files.slice(0, maxFiles)) {
     const relative = path.relative(root, absolute).split(path.sep).join("/"), lines = (await readFile(absolute, "utf8")).split(/\r?\n/);
     const step = Math.max(1, chunkLines - overlap);
     for (let start = 0; start < lines.length; start += step) {

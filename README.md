@@ -410,6 +410,7 @@ Scavi aims to make AI context a maintainable part of the software development li
 * [x] Optional semantic verification with evidence and confidence
 * [x] Local lexical repository retrieval
 * [x] OpenAI Responses API provider
+* [x] Local Ollama provider
 * [x] `scavi check`
 * [x] Deterministic `scavi fix`
 * [x] GitHub Action
@@ -422,7 +423,6 @@ Scavi aims to make AI context a maintainable part of the software development li
 * [ ] Context size and duplication analysis
 * [ ] Historical drift detection
 * [ ] MCP integration
-* [x] Local Ollama provider
 * [ ] Evaluation suite
 * [ ] Optional web dashboard
 

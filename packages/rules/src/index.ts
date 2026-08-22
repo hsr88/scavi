@@ -67,7 +67,10 @@ export async function runDeterministicRules(contexts: ParsedContext[], facts: Re
     }
     for (const claim of context.dependencies) {
       const declared = facts.dependencies[claim.package];
-      if (!declared) continue;
+      if (!declared) {
+        issues.push({ id: "MISSING_DEPENDENCY", rule: "dependency-version", severity: "error", source: claim.source, message: `${claim.package} ${claim.version} is named as a dependency, but it is not declared`, claim: claim.text, evidence: [{ file: "package.json", description: `${claim.package} is absent from dependencies, devDependencies, peerDependencies, and optionalDependencies` }] });
+        continue;
+      }
       const actual = declared.match(/\d+(?:\.\d+){0,2}/)?.[0];
       const claimedMajor = claim.version.split(".")[0], actualMajor = actual?.split(".")[0];
       if (actualMajor && claimedMajor !== actualMajor) {

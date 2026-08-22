@@ -11904,12 +11904,12 @@ var require_headers = __commonJS({
       append(name, value, isLowerCase) {
         this[kHeadersSortedMap] = null;
         const lowercaseName = isLowerCase ? name : name.toLowerCase();
-        const exists3 = this[kHeadersMap].get(lowercaseName);
-        if (exists3) {
+        const exists4 = this[kHeadersMap].get(lowercaseName);
+        if (exists4) {
           const delimiter = lowercaseName === "cookie" ? "; " : ", ";
           this[kHeadersMap].set(lowercaseName, {
-            name: exists3.name,
-            value: `${exists3.value}${delimiter}${value}`
+            name: exists4.name,
+            value: `${exists4.value}${delimiter}${value}`
           });
         } else {
           this[kHeadersMap].set(lowercaseName, { name, value });
@@ -19443,11 +19443,21 @@ var MANAGERS = ["pnpm", "npm", "yarn", "bun"];
 async function cursorRules(root) {
   const directory = import_node_path.default.join(root, ".cursor", "rules");
   try {
-    const entries = await (0, import_promises.readdir)(directory, { withFileTypes: true, recursive: true });
-    return entries.filter((entry) => entry.isFile() && entry.name.endsWith(".mdc")).map((entry) => import_node_path.default.join(entry.parentPath, entry.name));
+    return (await walkFiles(directory)).filter((file) => file.endsWith(".mdc"));
   } catch {
     return [];
   }
+}
+async function walkFiles(directory) {
+  const files = [];
+  for (const entry of await (0, import_promises.readdir)(directory, { withFileTypes: true })) {
+    const absolute = import_node_path.default.join(directory, entry.name);
+    if (entry.isDirectory())
+      files.push(...await walkFiles(absolute));
+    else if (entry.isFile() || entry.isSymbolicLink())
+      files.push(absolute);
+  }
+  return files;
 }
 function globRegex(pattern) {
   let expression = "";
@@ -19471,11 +19481,7 @@ async function customFiles(root, patterns) {
     return safePatterns.map((item) => import_node_path.default.join(root, item));
   const matches = safePatterns.filter((item) => !item.includes("*")).map((item) => import_node_path.default.join(root, item));
   const regexes = safePatterns.filter((item) => item.includes("*")).map(globRegex);
-  const entries = await (0, import_promises.readdir)(root, { withFileTypes: true, recursive: true });
-  for (const entry of entries) {
-    if (!entry.isFile())
-      continue;
-    const absolute = import_node_path.default.join(entry.parentPath, entry.name);
+  for (const absolute of await walkFiles(root)) {
     const relative = import_node_path.default.relative(root, absolute).split(import_node_path.default.sep).join("/");
     if (relative.split("/").some((part) => [".git", "node_modules", "dist", ".scavi"].includes(part)))
       continue;
@@ -19487,9 +19493,14 @@ async function customFiles(root, patterns) {
 async function discoverContextFiles(root, custom = []) {
   const candidates = [...ROOT_FILES.map((file) => import_node_path.default.join(root, file)), import_node_path.default.join(root, ".github", "copilot-instructions.md"), ...await cursorRules(root), ...await customFiles(root, custom)];
   const result = [];
+  const rootReal = await (0, import_promises.realpath)(root);
   for (const absolutePath of [...new Set(candidates)]) {
     try {
-      result.push({ absolutePath, relativePath: import_node_path.default.relative(root, absolutePath).split(import_node_path.default.sep).join("/"), content: await (0, import_promises.readFile)(absolutePath, "utf8") });
+      const fileReal = await (0, import_promises.realpath)(absolutePath);
+      const relation = import_node_path.default.relative(rootReal, fileReal);
+      if (relation.startsWith("..") || import_node_path.default.isAbsolute(relation))
+        continue;
+      result.push({ absolutePath: fileReal, relativePath: import_node_path.default.relative(rootReal, fileReal).split(import_node_path.default.sep).join("/"), content: await (0, import_promises.readFile)(fileReal, "utf8") });
     } catch (error2) {
       const code = error2.code;
       if (code !== "ENOENT" && code !== "ENOTDIR")
@@ -19508,13 +19519,18 @@ function isPath(value) {
   return value.startsWith("./") || value.startsWith("../") || value.startsWith("/") || /^[\w.-]+\/[\w./-]+$/.test(value) || /^\.?[\w-]+\.[a-z0-9]{1,8}$/i.test(value);
 }
 function command(value) {
-  const match = value.trim().match(/^(npm|pnpm|yarn|bun)\s+(?:(?:run)\s+)?([\w:@./-]+)(?:\s+.*)?$/);
+  const match = value.trim().match(/^(npm|pnpm|yarn|bun)\s+(?:(run)\s+)?([\w:@./-]+)(?:\s+.*)?$/);
   if (!match)
     return;
   const manager = match[1];
-  const token = match[2];
-  const builtins = /* @__PURE__ */ new Set(["install", "add", "remove", "exec", "dlx", "init", "create", "publish", "pack"]);
-  return { type: "command", value: value.trim(), manager, script: builtins.has(token) ? void 0 : token };
+  const explicitRun = Boolean(match[2]), token = match[3];
+  const builtins = {
+    npm: /* @__PURE__ */ new Set(["access", "adduser", "audit", "bugs", "cache", "ci", "config", "dedupe", "deprecate", "diff", "dist-tag", "docs", "doctor", "edit", "exec", "explain", "explore", "find-dupes", "fund", "help", "hook", "init", "install", "link", "login", "logout", "ls", "org", "outdated", "owner", "pack", "ping", "pkg", "prefix", "profile", "prune", "publish", "query", "rebuild", "repo", "root", "search", "shrinkwrap", "star", "stars", "team", "token", "uninstall", "unpublish", "unstar", "update", "version", "view", "whoami"]),
+    pnpm: /* @__PURE__ */ new Set(["add", "approve-builds", "audit", "config", "create", "deploy", "dlx", "exec", "fetch", "import", "init", "install", "link", "list", "outdated", "pack", "patch", "prune", "publish", "rebuild", "remove", "root", "self-update", "setup", "store", "unlink", "update", "why"]),
+    yarn: /* @__PURE__ */ new Set(["add", "cache", "config", "create", "dedupe", "dlx", "exec", "explain", "info", "init", "install", "link", "npm", "pack", "patch", "plugin", "rebuild", "remove", "search", "set", "stage", "unlink", "up", "why", "workspace", "workspaces"]),
+    bun: /* @__PURE__ */ new Set(["add", "build", "create", "help", "init", "install", "link", "pm", "publish", "remove", "run", "test", "unlink", "update", "upgrade", "x"])
+  };
+  return { type: "command", value: value.trim(), manager, script: !explicitRun && builtins[manager].has(token) ? void 0 : token };
 }
 function parseContextFile(file) {
   const paths = [], commands = [], packageManagers = [], dependencies = [], semanticClaims = [];
@@ -19525,8 +19541,6 @@ function parseContextFile(file) {
       inFence = !inFence;
       return;
     }
-    if (inFence)
-      return;
     const pathCount = paths.length, commandCount = commands.length, dependencyCount = dependencies.length;
     for (const match of line.matchAll(/`([^`\r\n]+)`/g)) {
       const value = match[1].trim().replace(/[.,;:]$/, "");
@@ -19536,6 +19550,11 @@ function parseContextFile(file) {
         commands.push({ ...parsed, source: claimSource, text: line.trim() });
       else if (isPath(value))
         paths.push({ type: "path", value, source: claimSource, text: line.trim() });
+    }
+    if (inFence) {
+      const parsed = command(line.trim());
+      if (parsed)
+        commands.push({ ...parsed, source: { ...source, column: line.search(/\S/) + 1 }, text: line.trim() });
     }
     for (const manager of MANAGERS) {
       const explicit = new RegExp(`\\b(?:use|using|uses|with|prefer|package manager(?: is|:)?)[ \\t]+${manager}\\b`, "i");
@@ -19554,7 +19573,7 @@ function parseContextFile(file) {
     const deterministicOnLine = paths.length > pathCount || commands.length > commandCount || dependencies.length > dependencyCount;
     const semanticPattern = /\b(?:configuration|settings|authentication|authorization|data|state|storage|frontend|backend|api|database|application|app|service|users?|requests?)\b.*\b(?:is|are|stores?|stored|persists?|persisted|uses?|writes?|reads?|flows?|runs?)\b/i;
     const text = line.trim().replace(/^[-*>]\s*/, "");
-    if (!deterministicOnLine && text.length >= 20 && text.length <= 500 && !text.startsWith("#") && semanticPattern.test(text))
+    if (!inFence && !deterministicOnLine && text.length >= 20 && text.length <= 500 && !text.startsWith("#") && semanticPattern.test(text))
       semanticClaims.push({ type: "semantic", text, source });
   });
   return { file, paths, commands, packageManagers, dependencies, semanticClaims };
@@ -19576,21 +19595,31 @@ function tokens(value) {
 async function indexRepository(root, options = {}) {
   const exclude = new Set((options.excludeFiles ?? []).map((file) => file.replace(/\\/g, "/")));
   const maxFiles = options.maxFiles ?? 2e3, maxBytes = options.maxFileBytes ?? 256e3, chunkLines = options.chunkLines ?? 40, overlap = options.overlapLines ?? 8;
-  const entries = await (0, import_promises2.readdir)(root, { withFileTypes: true, recursive: true });
+  async function walk(directory) {
+    const discovered = [];
+    for (const entry of await (0, import_promises2.readdir)(directory, { withFileTypes: true })) {
+      const absolute = import_node_path2.default.join(directory, entry.name);
+      const relative = import_node_path2.default.relative(root, absolute).split(import_node_path2.default.sep).join("/");
+      if (entry.isDirectory()) {
+        if (!relative.split("/").some((part) => EXCLUDED_DIRECTORIES.has(part)))
+          discovered.push(...await walk(absolute));
+      } else if (entry.isFile())
+        discovered.push(absolute);
+    }
+    return discovered;
+  }
   const files = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || files.length >= maxFiles)
-      continue;
-    const absolute = import_node_path2.default.join(entry.parentPath, entry.name), relative = import_node_path2.default.relative(root, absolute).split(import_node_path2.default.sep).join("/");
+  for (const absolute of (await walk(root)).sort()) {
+    const relative = import_node_path2.default.relative(root, absolute).split(import_node_path2.default.sep).join("/");
     if (relative.split("/").some((part) => EXCLUDED_DIRECTORIES.has(part)) || exclude.has(relative))
       continue;
-    if (!TEXT_EXTENSIONS.has(import_node_path2.default.extname(entry.name).toLowerCase()) && !TEXT_FILENAMES.has(entry.name))
+    if (!TEXT_EXTENSIONS.has(import_node_path2.default.extname(absolute).toLowerCase()) && !TEXT_FILENAMES.has(import_node_path2.default.basename(absolute)))
       continue;
     if ((await (0, import_promises2.stat)(absolute)).size <= maxBytes)
       files.push(absolute);
   }
   const chunks = [];
-  for (const absolute of files.sort()) {
+  for (const absolute of files.slice(0, maxFiles)) {
     const relative = import_node_path2.default.relative(root, absolute).split(import_node_path2.default.sep).join("/"), lines = (await (0, import_promises2.readFile)(absolute, "utf8")).split(/\r?\n/);
     const step = Math.max(1, chunkLines - overlap);
     for (let start = 0; start < lines.length; start += step) {
@@ -19717,8 +19746,10 @@ async function runDeterministicRules(contexts, facts) {
       }
     for (const claim of context.dependencies) {
       const declared = facts.dependencies[claim.package];
-      if (!declared)
+      if (!declared) {
+        issues.push({ id: "MISSING_DEPENDENCY", rule: "dependency-version", severity: "error", source: claim.source, message: `${claim.package} ${claim.version} is named as a dependency, but it is not declared`, claim: claim.text, evidence: [{ file: "package.json", description: `${claim.package} is absent from dependencies, devDependencies, peerDependencies, and optionalDependencies` }] });
         continue;
+      }
       const actual = declared.match(/\d+(?:\.\d+){0,2}/)?.[0];
       const claimedMajor = claim.version.split(".")[0], actualMajor = actual?.split(".")[0];
       if (actualMajor && claimedMajor !== actualMajor) {
@@ -19757,12 +19788,20 @@ async function isDirectory2(candidate) {
     return false;
   }
 }
+async function exists3(candidate) {
+  try {
+    await (0, import_promises4.stat)(candidate);
+    return true;
+  } catch {
+    return false;
+  }
+}
 async function findRepositoryRoot(start = process.cwd()) {
   let current = import_node_path4.default.resolve(start);
   if (!await isDirectory2(current))
     throw new Error(`Repository path is not a directory: ${start}`);
   while (true) {
-    if (await isDirectory2(import_node_path4.default.join(current, ".git")))
+    if (await exists3(import_node_path4.default.join(current, ".git")))
       return current;
     const parent = import_node_path4.default.dirname(current);
     if (parent === current)
@@ -19789,8 +19828,11 @@ async function loadConfig(root) {
   const provider = stringValue("provider");
   return { context, checks: semantic ? { semantic: semantic === "true" } : void 0, ai: aiBlock ? { provider: provider === "openai" || provider === "ollama" ? provider : void 0, model: stringValue("model"), baseUrl: stringValue("baseUrl") } : void 0 };
 }
+function configuredModel(config) {
+  return config.ai?.model || process.env.SCAVI_AI_MODEL || "";
+}
 function configuredProvider(config) {
-  const model = config.ai?.model ?? process.env.SCAVI_AI_MODEL ?? "";
+  const model = configuredModel(config);
   if (config.ai?.provider === "openai")
     return new OpenAIResponsesProvider({ apiKey: process.env.OPENAI_API_KEY ?? "", model, baseUrl: config.ai.baseUrl ?? process.env.OPENAI_BASE_URL });
   if (config.ai?.provider === "ollama")
@@ -19841,11 +19883,26 @@ async function checkRepository(start, options = {}) {
 function safe(value) {
   return value.replace(/[\\`*_[\]{}<>#+.!|()-]/g, "\\$&").replace(/\r?\n/g, " ");
 }
+function filterResultForChanges(result, changedFiles2) {
+  if (changedFiles2.length === 0) return result;
+  const changed = new Set(changedFiles2.map((file) => file.replace(/\\/g, "/")));
+  const factFiles = /* @__PURE__ */ new Set(["package.json", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock", "bun.lockb", "scavi.config.ts"]);
+  const repositoryFactsChanged = [...changed].some((file) => factFiles.has(file));
+  const affected = result.issues.filter((issue2) => {
+    const source = issue2.source.file.replace(/\\/g, "/");
+    if (changed.has(source)) return true;
+    if (issue2.evidence.some((item) => item.file && changed.has(item.file.replace(/\\/g, "/")))) return true;
+    if (repositoryFactsChanged && ["valid-command", "package-manager", "dependency-version"].includes(issue2.rule)) return true;
+    return [...changed].some((file) => issue2.message.includes(file) || issue2.claim?.includes(file));
+  });
+  const semanticFindings = result.semanticFindings.filter((finding) => changed.has(finding.source.file.replace(/\\/g, "/")) || finding.evidence.some((item) => changed.has(item.file.replace(/\\/g, "/"))));
+  return { ...result, issues: affected, semanticFindings, summary: { errors: affected.filter((issue2) => issue2.severity === "error").length, warnings: affected.filter((issue2) => issue2.severity === "warning").length, infos: affected.filter((issue2) => issue2.severity === "info").length, total: affected.length } };
+}
 function buildMarkdownReport(result, changedFiles2) {
-  const lines = ["## \u{1F43E} Scavi Context Check", "", `**${result.summary.total} ${result.summary.total === 1 ? "issue" : "issues"} found**`, "", `- Errors: ${result.summary.errors}`, `- Warnings: ${result.summary.warnings}`, `- Context files: ${result.contextFiles.length}`];
+  const lines = ["## \u{1F43E} Scavi Context Check", "", `**${result.summary.total} ${result.summary.total === 1 ? "issue" : "issues"} found**`, "", `- Errors: ${result.summary.errors}`, `- Warnings: ${result.summary.warnings}`, `- Infos: ${result.summary.infos}`, `- Context files: ${result.contextFiles.length}`];
   if (changedFiles2.length) {
     lines.push("", `<details><summary>${changedFiles2.length} changed ${changedFiles2.length === 1 ? "file" : "files"} considered</summary>`, "");
-    changedFiles2.slice(0, 100).forEach((file) => lines.push(`- \`${safe(file)}\``));
+    changedFiles2.slice(0, 100).forEach((file) => lines.push(`- ${safe(file)}`));
     if (changedFiles2.length > 100) lines.push(`- \u2026and ${changedFiles2.length - 100} more`);
     lines.push("", "</details>");
   }
@@ -19856,7 +19913,7 @@ function buildMarkdownReport(result, changedFiles2) {
     if (issue2.confidence !== void 0) lines.push("", `Confidence: **${Math.round(issue2.confidence * 100)}%**`);
     if (issue2.evidence.length) {
       lines.push("", "Evidence:");
-      issue2.evidence.forEach((item) => lines.push(`- ${item.file ? `\`${safe(item.file)}\`: ` : ""}${safe(item.description)}`));
+      issue2.evidence.forEach((item) => lines.push(`- ${item.file ? `${safe(item.file)}: ` : ""}${safe(item.description)}`));
     }
   }
   if (result.summary.total === 0) lines.push("", "\u2705 No context issues found.");
@@ -19869,7 +19926,7 @@ var execFileAsync = (0, import_node_util.promisify)(import_node_child_process.ex
 async function changedFiles(root, base) {
   if (!base) return [];
   if (base.startsWith("-") || !/^[A-Za-z0-9_./-]+$/.test(base)) throw new Error("diff-base contains unsupported characters");
-  const { stdout } = await execFileAsync("git", ["diff", "--name-only", "--diff-filter=ACMR", `${base}...HEAD`, "--"], { cwd: root, encoding: "utf8", maxBuffer: 2e6 });
+  const { stdout } = await execFileAsync("git", ["diff", "--name-only", "--diff-filter=ACDMR", `${base}...HEAD`, "--"], { cwd: root, encoding: "utf8", maxBuffer: 2e6 });
   return stdout.split(/\r?\n/).map((file) => file.trim()).filter(Boolean);
 }
 async function runAction() {
@@ -19877,7 +19934,8 @@ async function runAction() {
     const root = getInput("repository-path") || ".";
     const base = getInput("diff-base");
     const changes = await changedFiles(root, base);
-    const result = await checkRepository(root);
+    const fullResult = await checkRepository(root);
+    const result = filterResultForChanges(fullResult, changes);
     const report = buildMarkdownReport(result, changes);
     await summary.addRaw(report).write();
     setOutput("issue-count", result.summary.total);

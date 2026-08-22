@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { describe, expect, it } from "vitest";
 import type { SemanticProvider } from "@scavi/ai";
-import { applyFixes, checkRepository, exitCodeFor, initRepository, loadConfig, previewFixes } from "../src/index.js";
+import { applyFixes, checkRepository, configuredModel, exitCodeFor, findRepositoryRoot, initRepository, loadConfig, previewFixes } from "../src/index.js";
 
 const fixtures = path.resolve(import.meta.dirname, "../../../fixtures");
 
@@ -18,6 +18,17 @@ describe("checkRepository", () => {
     const result = await checkRepository(path.join(fixtures, "broken-repo"));
     expect(result.issues.map((issue) => issue.id)).toEqual(expect.arrayContaining(["STALE_PATH", "MISSING_REFERENCED_FILE", "INVALID_COMMAND", "PACKAGE_MANAGER_MISMATCH", "CONTEXT_CONFLICT", "DEPENDENCY_VERSION_MISMATCH"]));
     expect(exitCodeFor(result)).toBe(1);
+  });
+});
+
+describe("findRepositoryRoot", () => {
+  it("accepts a .git file used by Git worktrees", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "scavi-worktree-"));
+    try {
+      await mkdir(path.join(root, "nested"));
+      await writeFile(path.join(root, ".git"), "gitdir: elsewhere\n", "utf8");
+      expect(await findRepositoryRoot(path.join(root, "nested"))).toBe(root);
+    } finally { await rm(root, { recursive: true, force: true }) }
   });
 });
 
@@ -48,6 +59,18 @@ describe("initRepository", () => {
   });
 });
 
+describe("semantic configuration", () => {
+  it("uses SCAVI_AI_MODEL when the generated config leaves model empty", () => {
+    const previous = process.env.SCAVI_AI_MODEL;
+    process.env.SCAVI_AI_MODEL = "environment-model";
+    try { expect(configuredModel({ ai: { provider: "openai", model: "" } })).toBe("environment-model") }
+    finally {
+      if (previous === undefined) delete process.env.SCAVI_AI_MODEL;
+      else process.env.SCAVI_AI_MODEL = previous;
+    }
+  });
+});
+
 describe("deterministic fixes", () => {
   it("previews and applies only evidence-backed minimal edits", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "scavi-fix-"));
@@ -73,6 +96,19 @@ describe("deterministic fixes", () => {
       await writeFile(path.join(root, "AGENTS.md"), "Use yarn.\n", "utf8");
       await expect(applyFixes(result)).rejects.toThrow("Context changed");
       expect(await readFile(path.join(root, "AGENTS.md"), "utf8")).toBe("Use yarn.\n");
+    } finally { await rm(root, { recursive: true, force: true }) }
+  });
+
+  it("validates every file before writing any fix", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "scavi-atomic-fix-"));
+    try {
+      await writeFile(path.join(root, "package.json"), JSON.stringify({ packageManager: "pnpm@10.32.1" }), "utf8");
+      await writeFile(path.join(root, "AGENTS.md"), "Use npm.\n", "utf8");
+      await writeFile(path.join(root, "CLAUDE.md"), "Use yarn.\n", "utf8");
+      const result = await checkRepository(root);
+      await writeFile(path.join(root, "CLAUDE.md"), "Use bun.\n", "utf8");
+      await expect(applyFixes(result)).rejects.toThrow("Context changed");
+      expect(await readFile(path.join(root, "AGENTS.md"), "utf8")).toBe("Use npm.\n");
     } finally { await rm(root, { recursive: true, force: true }) }
   });
 });

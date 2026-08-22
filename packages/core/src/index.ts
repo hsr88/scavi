@@ -12,12 +12,13 @@ export interface CheckOptions { semanticProvider?: SemanticProvider }
 export interface InitResult { root: string; configPath: string; created: boolean; contextFiles: string[]; packageManager?: string }
 
 async function isDirectory(candidate: string): Promise<boolean> { try { return (await stat(candidate)).isDirectory() } catch { return false } }
+async function exists(candidate: string): Promise<boolean> { try { await stat(candidate); return true } catch { return false } }
 
 export async function findRepositoryRoot(start = process.cwd()): Promise<string> {
   let current = path.resolve(start);
   if (!(await isDirectory(current))) throw new Error(`Repository path is not a directory: ${start}`);
   while (true) {
-    if (await isDirectory(path.join(current, ".git"))) return current;
+    if (await exists(path.join(current, ".git"))) return current;
     const parent = path.dirname(current);
     if (parent === current) return path.resolve(start);
     current = parent;
@@ -57,8 +58,10 @@ export async function initRepository(start?: string): Promise<InitResult> {
   return { root, configPath, created, contextFiles: context, packageManager: facts.packageManager };
 }
 
+export function configuredModel(config: ScaviConfig): string { return config.ai?.model || process.env.SCAVI_AI_MODEL || "" }
+
 function configuredProvider(config: ScaviConfig): SemanticProvider {
-  const model = config.ai?.model ?? process.env.SCAVI_AI_MODEL ?? "";
+  const model = configuredModel(config);
   if (config.ai?.provider === "openai") return new OpenAIResponsesProvider({ apiKey: process.env.OPENAI_API_KEY ?? "", model, baseUrl: config.ai.baseUrl ?? process.env.OPENAI_BASE_URL });
   if (config.ai?.provider === "ollama") return new OllamaProvider({ model, baseUrl: config.ai.baseUrl ?? process.env.OLLAMA_HOST });
   throw new Error("Semantic analysis requires ai.provider: \"openai\" or \"ollama\"");
@@ -137,18 +140,23 @@ export async function previewFixes(result: CheckResult): Promise<string> {
 export async function applyFixes(result: CheckResult): Promise<number> {
   const edits = fixEdits(result), groups = new Map<string, ScaviEdit[]>();
   for (const edit of edits) groups.set(edit.file, [...(groups.get(edit.file) ?? []), edit]);
-  let applied = 0;
+  const prepared: Array<{ fileReal: string; modified: string; editCount: number }> = [];
+  const rootReal = await realpath(result.root);
   for (const [file, fileEdits] of groups) {
     const absolute = path.resolve(result.root, file);
-    const rootReal = await realpath(result.root), fileReal = await realpath(absolute);
+    const fileReal = await realpath(absolute);
     const relation = path.relative(rootReal, fileReal);
     if (relation.startsWith("..") || path.isAbsolute(relation)) throw new Error(`Fix target escapes repository root: ${file}`);
     const original = await readFile(fileReal, "utf8");
     const modified = applyToContent(original, fileEdits);
+    prepared.push({ fileReal, modified, editCount: fileEdits.length });
+  }
+  let applied = 0;
+  for (const { fileReal, modified, editCount } of prepared) {
     const temporary = path.join(path.dirname(fileReal), `.scavi-fix-${process.pid}-${Math.random().toString(16).slice(2)}.tmp`);
     try { await writeFile(temporary, modified, { encoding: "utf8", flag: "wx" }); await rename(temporary, fileReal) }
     finally { try { await unlink(temporary) } catch { /* already renamed */ } }
-    applied += fileEdits.length;
+    applied += editCount;
   }
   return applied;
 }

@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
@@ -17,9 +17,18 @@ const MANAGERS: PackageManager[] = ["pnpm", "npm", "yarn", "bun"];
 async function cursorRules(root: string): Promise<string[]> {
   const directory = path.join(root, ".cursor", "rules");
   try {
-    const entries = await readdir(directory, { withFileTypes: true, recursive: true });
-    return entries.filter((entry) => entry.isFile() && entry.name.endsWith(".mdc")).map((entry) => path.join(entry.parentPath, entry.name));
+    return (await walkFiles(directory)).filter((file) => file.endsWith(".mdc"));
   } catch { return []; }
+}
+
+async function walkFiles(directory: string): Promise<string[]> {
+  const files: string[] = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await walkFiles(absolute));
+    else if (entry.isFile() || entry.isSymbolicLink()) files.push(absolute);
+  }
+  return files;
 }
 
 function globRegex(pattern: string): RegExp {
@@ -38,10 +47,7 @@ async function customFiles(root: string, patterns: string[]): Promise<string[]> 
   if (!safePatterns.some((item) => item.includes("*"))) return safePatterns.map((item) => path.join(root, item));
   const matches: string[] = safePatterns.filter((item) => !item.includes("*")).map((item) => path.join(root, item));
   const regexes = safePatterns.filter((item) => item.includes("*")).map(globRegex);
-  const entries = await readdir(root, { withFileTypes: true, recursive: true });
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const absolute = path.join(entry.parentPath, entry.name);
+  for (const absolute of await walkFiles(root)) {
     const relative = path.relative(root, absolute).split(path.sep).join("/");
     if (relative.split("/").some((part) => [".git", "node_modules", "dist", ".scavi"].includes(part))) continue;
     if (regexes.some((regex) => regex.test(relative))) matches.push(absolute);
@@ -52,9 +58,13 @@ async function customFiles(root: string, patterns: string[]): Promise<string[]> 
 export async function discoverContextFiles(root: string, custom: string[] = []): Promise<ContextFile[]> {
   const candidates = [...ROOT_FILES.map((file) => path.join(root, file)), path.join(root, ".github", "copilot-instructions.md"), ...(await cursorRules(root)), ...(await customFiles(root, custom))];
   const result: ContextFile[] = [];
+  const rootReal = await realpath(root);
   for (const absolutePath of [...new Set(candidates)]) {
     try {
-      result.push({ absolutePath, relativePath: path.relative(root, absolutePath).split(path.sep).join("/"), content: await readFile(absolutePath, "utf8") });
+      const fileReal = await realpath(absolutePath);
+      const relation = path.relative(rootReal, fileReal);
+      if (relation.startsWith("..") || path.isAbsolute(relation)) continue;
+      result.push({ absolutePath: fileReal, relativePath: path.relative(rootReal, fileReal).split(path.sep).join("/"), content: await readFile(fileReal, "utf8") });
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
@@ -71,12 +81,17 @@ function isPath(value: string): boolean {
 }
 
 function command(value: string): Omit<CommandClaim, "source" | "text"> | undefined {
-  const match = value.trim().match(/^(npm|pnpm|yarn|bun)\s+(?:(?:run)\s+)?([\w:@./-]+)(?:\s+.*)?$/);
+  const match = value.trim().match(/^(npm|pnpm|yarn|bun)\s+(?:(run)\s+)?([\w:@./-]+)(?:\s+.*)?$/);
   if (!match) return;
   const manager = match[1] as PackageManager;
-  const token = match[2];
-  const builtins = new Set(["install", "add", "remove", "exec", "dlx", "init", "create", "publish", "pack"]);
-  return { type: "command", value: value.trim(), manager, script: builtins.has(token) ? undefined : token };
+  const explicitRun = Boolean(match[2]), token = match[3];
+  const builtins: Record<PackageManager, Set<string>> = {
+    npm: new Set(["access", "adduser", "audit", "bugs", "cache", "ci", "config", "dedupe", "deprecate", "diff", "dist-tag", "docs", "doctor", "edit", "exec", "explain", "explore", "find-dupes", "fund", "help", "hook", "init", "install", "link", "login", "logout", "ls", "org", "outdated", "owner", "pack", "ping", "pkg", "prefix", "profile", "prune", "publish", "query", "rebuild", "repo", "root", "search", "shrinkwrap", "star", "stars", "team", "token", "uninstall", "unpublish", "unstar", "update", "version", "view", "whoami"]),
+    pnpm: new Set(["add", "approve-builds", "audit", "config", "create", "deploy", "dlx", "exec", "fetch", "import", "init", "install", "link", "list", "outdated", "pack", "patch", "prune", "publish", "rebuild", "remove", "root", "self-update", "setup", "store", "unlink", "update", "why"]),
+    yarn: new Set(["add", "cache", "config", "create", "dedupe", "dlx", "exec", "explain", "info", "init", "install", "link", "npm", "pack", "patch", "plugin", "rebuild", "remove", "search", "set", "stage", "unlink", "up", "why", "workspace", "workspaces"]),
+    bun: new Set(["add", "build", "create", "help", "init", "install", "link", "pm", "publish", "remove", "run", "test", "unlink", "update", "upgrade", "x"]),
+  };
+  return { type: "command", value: value.trim(), manager, script: !explicitRun && builtins[manager].has(token) ? undefined : token };
 }
 
 export function parseContextFile(file: ContextFile): ParsedContext {
@@ -85,7 +100,6 @@ export function parseContextFile(file: ContextFile): ParsedContext {
   file.content.split(/\r?\n/).forEach((line, index) => {
     const source = { file: file.relativePath, line: index + 1 };
     if (/^\s*```/.test(line)) { inFence = !inFence; return }
-    if (inFence) return;
     const pathCount = paths.length, commandCount = commands.length, dependencyCount = dependencies.length;
     for (const match of line.matchAll(/`([^`\r\n]+)`/g)) {
       const value = match[1].trim().replace(/[.,;:]$/, "");
@@ -93,6 +107,10 @@ export function parseContextFile(file: ContextFile): ParsedContext {
       const claimSource = { ...source, column: (match.index ?? 0) + 2 };
       if (parsed) commands.push({ ...parsed, source: claimSource, text: line.trim() });
       else if (isPath(value)) paths.push({ type: "path", value, source: claimSource, text: line.trim() });
+    }
+    if (inFence) {
+      const parsed = command(line.trim());
+      if (parsed) commands.push({ ...parsed, source: { ...source, column: line.search(/\S/) + 1 }, text: line.trim() });
     }
     for (const manager of MANAGERS) {
       const explicit = new RegExp(`\\b(?:use|using|uses|with|prefer|package manager(?: is|:)?)[ \\t]+${manager}\\b`, "i");
@@ -113,7 +131,7 @@ export function parseContextFile(file: ContextFile): ParsedContext {
     const deterministicOnLine = paths.length > pathCount || commands.length > commandCount || dependencies.length > dependencyCount;
     const semanticPattern = /\b(?:configuration|settings|authentication|authorization|data|state|storage|frontend|backend|api|database|application|app|service|users?|requests?)\b.*\b(?:is|are|stores?|stored|persists?|persisted|uses?|writes?|reads?|flows?|runs?)\b/i;
     const text = line.trim().replace(/^[-*>]\s*/, "");
-    if (!deterministicOnLine && text.length >= 20 && text.length <= 500 && !text.startsWith("#") && semanticPattern.test(text)) semanticClaims.push({ type: "semantic", text, source });
+    if (!inFence && !deterministicOnLine && text.length >= 20 && text.length <= 500 && !text.startsWith("#") && semanticPattern.test(text)) semanticClaims.push({ type: "semantic", text, source });
   });
   return { file, paths, commands, packageManagers, dependencies, semanticClaims };
 }

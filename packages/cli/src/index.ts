@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline/promises";
+import path from "node:path";
 import { applyFixes, checkRepository, exitCodeFor, initRepository, previewFixes, type CheckResult, type InitResult } from "@scavi/core";
 
 function renderText(result: CheckResult): string {
@@ -36,7 +37,8 @@ function renderInit(result: InitResult): string {
   if (result.contextFiles.length) result.contextFiles.forEach((file) => lines.push(`  ✓ ${file}`));
   else lines.push("  None found yet");
   if (result.packageManager) lines.push("", `Package manager:\n  ${result.packageManager}`);
-  lines.push("", result.created ? `Created:\n  ${relative}` : `Not changed:\n  ${relative} already exists`, "", "Run:\n  scavi check");
+  const checkTarget = path.resolve(process.cwd()) === path.resolve(result.root) ? "" : ` ${JSON.stringify(result.root)}`;
+  lines.push("", result.created ? `Created:\n  ${relative}` : `Not changed:\n  ${relative} already exists`, "", `Run:\n  scavi check${checkTarget}`);
   return lines.join("\n");
 }
 

@@ -19,4 +19,14 @@ describe("parseContextFile", () => {
     const parsed = parseContextFile({ absolutePath: "/repo/AGENTS.md", relativePath: "AGENTS.md", content: "Configuration is persisted in SQLite storage.\n```md\nConfiguration is persisted in JSON files.\n```" });
     expect(parsed.semanticClaims.map((claim) => claim.text)).toEqual(["Configuration is persisted in SQLite storage."]);
   });
+
+  it("recognizes manager builtins, explicit scripts, and fenced commands", () => {
+    const parsed = parseContextFile({ absolutePath: "/repo/AGENTS.md", relativePath: "AGENTS.md", content: "`npm ci`\n`npm run install`\n`npm test`\n```sh\npnpm test\n```" });
+    expect(parsed.commands.map((claim) => ({ manager: claim.manager, script: claim.script }))).toEqual([
+      { manager: "npm", script: undefined },
+      { manager: "npm", script: "install" },
+      { manager: "npm", script: "test" },
+      { manager: "pnpm", script: "test" },
+    ]);
+  });
 });

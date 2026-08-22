@@ -3,6 +3,6 @@
   "bin":{"scavi":"dist/index.js"},"main":"dist/index.js","types":"dist/index.d.ts","files":["dist/index.js","dist/index.d.ts"],
   "repository":{"type":"git","url":"git+https://github.com/hsr88/scavi.git"},"homepage":"https://github.com/hsr88/scavi#readme","bugs":{"url":"https://github.com/hsr88/scavi/issues"},
   "publishConfig":{"access":"public"},"engines":{"node":">=20"},
-  "scripts":{"build":"tsc -b","bundle":"esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js"},
+  "scripts":{"build":"tsc -b","bundle":"esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js","prepublishOnly":"npm run bundle"},
   "devDependencies":{"@scavi/core":"workspace:*","esbuild":"^0.28.2"}
 }

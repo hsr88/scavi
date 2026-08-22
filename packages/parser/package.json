@@ -1,1 +1,1 @@
-{"name":"@scavi/parser","version":"0.1.0","license":"MIT","type":"module","main":"dist/index.js","types":"dist/index.d.ts","exports":"./dist/index.js","files":["dist"],"scripts":{"build":"tsc -b"}}
+{"name":"@scavi/parser","version":"0.1.0","private":true,"license":"MIT","type":"module","main":"dist/index.js","types":"dist/index.d.ts","exports":"./dist/index.js","files":["dist"],"scripts":{"build":"tsc -b"}}

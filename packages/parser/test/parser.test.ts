@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseContextFile } from "../src/index.js";
+import path from "node:path";
+import os from "node:os";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { discoverContextFiles, parseContextFile } from "../src/index.js";
 
 describe("parseContextFile", () => {
   it("extracts deterministic candidates from inline code", () => {
@@ -28,5 +31,20 @@ describe("parseContextFile", () => {
       { manager: "npm", script: "test" },
       { manager: "pnpm", script: "test" },
     ]);
+  });
+});
+
+describe("discoverContextFiles", () => {
+  it("does not read configured context through a link outside the repository", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "scavi-context-root-"));
+    const outside = await mkdtemp(path.join(os.tmpdir(), "scavi-context-outside-"));
+    try {
+      await writeFile(path.join(outside, "AGENTS.md"), "host secret", "utf8");
+      await symlink(outside, path.join(root, "linked"), "junction");
+      expect(await discoverContextFiles(root, ["linked/AGENTS.md"])).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
